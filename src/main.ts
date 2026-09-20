@@ -6,21 +6,46 @@ import Square from './geometry/Square';
 import OpenGLRenderer from './rendering/gl/OpenGLRenderer';
 import Camera from './Camera';
 import {setGL} from './globals';
-import ShaderProgram, {Shader} from './rendering/gl/ShaderProgram';
+import ShaderProgram, {Shader, FireballParams} from './rendering/gl/ShaderProgram';
 
 import lambertVertSource from './shaders/lambert-vert.glsl?raw';
 import lambertFragSource from './shaders/lambert-frag.glsl?raw';
 
+// The art-directed defaults. `Reset Defaults` copies these back over `controls`,
+// and they're kept separate so the button always has a pristine copy to restore.
+const defaults: FireballParams & {tesselations: number} = {
+  tesselations: 5,
+  displacement: 0.38,   // amplitude of the low-frequency sinusoidal lobes
+  lobeScale: 1.0,       // frequency of those lobes
+  detail: 0.13,         // amplitude of the high-frequency FBM crust
+  detailScale: 2.6,     // frequency of that FBM
+  octaves: 4,           // how many FBM octaves get summed
+  roilSpeed: 0.85,      // how fast the surface churns
+  pulsePeriod: 4.0,     // seconds per explosion/breath cycle
+  pulseStrength: 1.0,   // 0 holds the ball steady, 1 is the full swell
+};
+
 // Define an object with application parameters and button callbacks
 // This will be referred to by dat.GUI's functions that add GUI elements.
 const controls = {
-  tesselations: 5,
+  ...defaults,
   'Load Scene': loadScene, // A function pointer, essentially
+  'Reset Defaults': resetDefaults,
 };
 
 let icosphere: Icosphere;
 let square: Square;
 let prevTesselations: number = 5;
+let gui: DAT.GUI;
+
+// Restore the art-directed defaults, then push the new values back into the
+// sliders so the GUI doesn't keep showing the old ones.
+function resetDefaults() {
+  Object.assign(controls, defaults);
+  for (const controller of gui.__controllers) {
+    controller.updateDisplay();
+  }
+}
 
 function loadScene() {
   icosphere = new Icosphere(vec3.fromValues(0, 0, 0), 1, controls.tesselations);
@@ -39,9 +64,18 @@ function main() {
   document.body.appendChild(stats.domElement);
 
   // Add controls to the gui
-  const gui = new DAT.GUI();
+  gui = new DAT.GUI();
   gui.add(controls, 'tesselations', 0, 8).step(1);
+  gui.add(controls, 'displacement', 0.0, 0.8).step(0.01).name('displacement');
+  gui.add(controls, 'lobeScale', 0.2, 4.0).step(0.05).name('lobe scale');
+  gui.add(controls, 'detail', 0.0, 0.4).step(0.005).name('detail amount');
+  gui.add(controls, 'detailScale', 0.5, 8.0).step(0.1).name('detail scale');
+  gui.add(controls, 'octaves', 0, 8).step(1).name('fbm octaves');
+  gui.add(controls, 'roilSpeed', 0.0, 3.0).step(0.05).name('roil speed');
+  gui.add(controls, 'pulsePeriod', 0.5, 12.0).step(0.1).name('pulse period');
+  gui.add(controls, 'pulseStrength', 0.0, 1.0).step(0.01).name('pulse strength');
   gui.add(controls, 'Load Scene');
+  gui.add(controls, 'Reset Defaults');
 
   // get canvas and webgl context
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
@@ -67,9 +101,15 @@ function main() {
     new Shader(gl.FRAGMENT_SHADER, lambertFragSource),
   ]);
 
+  const startTime = performance.now();
+
   // This function will be called every frame
   function tick() {
     camera.update();
+    // Seconds since the program started, passed to the shaders so their
+    // displacement and color animate over time.
+    lambert.setTime((performance.now() - startTime) * 0.001);
+    lambert.setFireballParams(controls);
     stats.begin();
     gl.viewport(0, 0, window.innerWidth, window.innerHeight);
     renderer.clear();
