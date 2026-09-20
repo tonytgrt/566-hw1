@@ -15,14 +15,14 @@ import lambertFragSource from './shaders/lambert-frag.glsl?raw';
 // and they're kept separate so the button always has a pristine copy to restore.
 const defaults: FireballParams & {tesselations: number} = {
   tesselations: 5,
-  displacement: 0.38,   // amplitude of the low-frequency sinusoidal lobes
-  lobeScale: 1.0,       // frequency of those lobes
-  detail: 0.13,         // amplitude of the high-frequency FBM crust
-  detailScale: 2.6,     // frequency of that FBM
-  octaves: 4,           // how many FBM octaves get summed
-  roilSpeed: 0.85,      // how fast the surface churns
-  pulsePeriod: 4.0,     // seconds per explosion/breath cycle
-  pulseStrength: 1.0,   // 0 holds the ball steady, 1 is the full swell
+  displacement: 0.14,   // amplitude of the low-frequency sinusoidal lobes
+  lobeScale: 0.8,       // frequency of those lobes
+  detail: 0.14,         // amplitude of the high-frequency FBM crust
+  detailScale: 1.3,     // frequency of that FBM
+  octaves: 2,           // how many FBM octaves get summed
+  roilSpeed: 0.6,      // how fast the surface churns
+  pulsePeriod: 5.2,     // seconds per explosion/breath cycle
+  pulseStrength: 0.47,   // 0 holds the ball steady, 1 is the full swell
 };
 
 // Define an object with application parameters and button callbacks

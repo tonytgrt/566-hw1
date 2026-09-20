@@ -42,17 +42,16 @@ const vec4 lightPos = vec4(5, 5, 3, 1); //The position of our virtual light, whi
 
 // ---------------------------------------------------------------------------
 // Tunable art direction. Every one of these is driven by a dat.GUI slider in
-// main.ts; the value in each comment is the default that "Reset Defaults"
-// restores.
+// main.ts;
 // ---------------------------------------------------------------------------
-uniform float u_LowFreqAmp;    // 0.38 - high amplitude, low frequency: the overall blobby silhouette
-uniform float u_LowFreqScale;  // 1.00 - spatial frequency of the sinusoidal lobes
-uniform float u_FbmAmp;        // 0.13 - low amplitude, high frequency: the crusty surface detail
-uniform float u_FbmScale;      // 2.60 - spatial frequency of the FBM
-uniform int   u_Octaves;       // 4    - how many FBM octaves are summed
-uniform float u_RoilSpeed;     // 0.85 - how quickly the surface churns
-uniform float u_PulsePeriod;   // 4.00 - seconds per "breath"/explosion cycle
-uniform float u_PulseStrength; // 1.00 - 0 holds the ball steady, 1 is the full swell
+uniform float u_LowFreqAmp;    // high amplitude, low frequency: the overall blobby silhouette
+uniform float u_LowFreqScale;  // spatial frequency of the sinusoidal lobes
+uniform float u_FbmAmp;        // low amplitude, high frequency: the crusty surface detail
+uniform float u_FbmScale;      // spatial frequency of the FBM
+uniform int   u_Octaves;       // how many FBM octaves are summed
+uniform float u_RoilSpeed;     // how quickly the surface churns
+uniform float u_PulsePeriod;   // seconds per "breath"/explosion cycle
+uniform float u_PulseStrength; // 0 holds the ball steady, 1 is the full swell
 
 const int   MAX_OCTAVES = 8;    // hard bound so the FBM loop always terminates
 const float MIN_RADIUS  = 0.15; // fraction of the base radius the surface may never go below
