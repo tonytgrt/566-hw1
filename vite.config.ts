@@ -11,8 +11,15 @@ export default defineConfig({
   // it's published under on GitHub Pages (https://username.github.io/repo-name/).
   base: './',
   server: {
-    port: 5660,
+    host: '127.0.0.1',
+    port: 5661,
+    strictPort: true,
     open: false,
+    allowedHosts: [
+      '566-hw1.tonyxtian.com',
+      'localhost',
+      '127.0.0.1'
+    ],
   },
   build: {
     outDir: 'dist',
