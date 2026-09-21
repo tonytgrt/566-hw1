@@ -31,7 +31,7 @@ const defaults: FireballParams & BackgroundParams & {tesselations: number} = {
   flameHeight: 1.5,     // vertical stretch from sphere to flame
   taper: 0.12,          // how far the crown is drawn in relative to the root
   bands: 12,             // quantized color bands; below 2 the gradient is smooth
-  horizon: 0.15,        // where the planet's limb crosses the centre of the screen
+  horizon: -0.07,        // where the planet's limb crosses the centre of the screen
   atmosphere: 0.028,    // thickness of the atmospheric halo above the limb
 };
 
@@ -48,12 +48,25 @@ let square: Square;
 let prevTesselations: number = 5;
 let gui: DAT.GUI;
 
+// Every slider we build, recorded so `Reset Defaults` can push the restored
+// values back into the widgets. Collected as they are created rather than read
+// off dat.GUI's `__controllers`, which holds only the panel's top level and
+// would silently skip everything nested inside a folder.
+const sliders: DAT.GUIController[] = [];
+
+// Add one slider to a folder and remember it. `prop` is keyed off `controls`,
+// so a mistyped name is a compile error rather than a silently dead control.
+function addSlider(folder: DAT.GUI, prop: keyof typeof controls, min: number,
+                   max: number, step: number, label: string) {
+  sliders.push(folder.add(controls, prop, min, max).step(step).name(label));
+}
+
 // Restore the art-directed defaults, then push the new values back into the
 // sliders so the GUI doesn't keep showing the old ones.
 function resetDefaults() {
   Object.assign(controls, defaults);
-  for (const controller of gui.__controllers) {
-    controller.updateDisplay();
+  for (const slider of sliders) {
+    slider.updateDisplay();
   }
 }
 
@@ -73,25 +86,50 @@ function main() {
   stats.domElement.style.top = '0px';
   document.body.appendChild(stats.domElement);
 
-  // Add controls to the gui
+  // Add controls to the gui, grouped by what each set actually affects. The
+  // folders open by default so nothing is hidden on load; collapsing them is
+  // the point of the grouping.
   gui = new DAT.GUI();
-  gui.add(controls, 'tesselations', 0, 8).step(1);
-  gui.add(controls, 'displacement', 0.0, 0.8).step(0.01).name('displacement');
-  gui.add(controls, 'lobeScale', 0.2, 4.0).step(0.05).name('lobe scale');
-  gui.add(controls, 'detail', 0.0, 0.6).step(0.005).name('detail amount');
-  gui.add(controls, 'detailScale', 0.5, 8.0).step(0.1).name('detail scale');
-  gui.add(controls, 'octaves', 0, 8).step(1).name('fbm octaves');
-  gui.add(controls, 'roilSpeed', 0.0, 3.0).step(0.05).name('roil speed');
-  gui.add(controls, 'pulsePeriod', 0.5, 12.0).step(0.1).name('pulse period');
-  gui.add(controls, 'pulseStrength', 0.0, 1.0).step(0.01).name('pulse strength');
-  gui.add(controls, 'heat', 0.2, 0.8).step(0.01).name('heat');
-  gui.add(controls, 'flow', 0.0, 0.6).step(0.01).name('color flow');
-  gui.add(controls, 'bandBlend', 0.0, 1.0).step(0.01).name('band blend');
-  gui.add(controls, 'flameHeight', 1.0, 2.5).step(0.05).name('flame height');
-  gui.add(controls, 'taper', 0.0, 0.8).step(0.01).name('taper');
-  gui.add(controls, 'bands', 0, 12).step(1).name('color bands');
-  gui.add(controls, 'horizon', -0.6, 0.8).step(0.01).name('horizon');
-  gui.add(controls, 'atmosphere', 0.005, 0.12).step(0.001).name('atmosphere');
+
+  // The silhouette before any noise touches it.
+  const shapeFolder = gui.addFolder('Flame shape');
+  addSlider(shapeFolder, 'tesselations', 0, 8, 1, 'tesselations');
+  addSlider(shapeFolder, 'flameHeight', 1.0, 2.5, 0.05, 'flame height');
+  addSlider(shapeFolder, 'taper', 0.0, 0.8, 0.01, 'taper');
+  shapeFolder.open();
+
+  // The vertex shader's two noise layers: the low-frequency sway and the
+  // high-frequency FBM that frays the crown into tongues.
+  const displacementFolder = gui.addFolder('Displacement');
+  addSlider(displacementFolder, 'displacement', 0.0, 0.8, 0.01, 'sway amount');
+  addSlider(displacementFolder, 'lobeScale', 0.2, 4.0, 0.05, 'sway scale');
+  addSlider(displacementFolder, 'detail', 0.0, 0.6, 0.005, 'detail amount');
+  addSlider(displacementFolder, 'detailScale', 0.5, 8.0, 0.1, 'detail scale');
+  addSlider(displacementFolder, 'octaves', 0, 8, 1, 'fbm octaves');
+  displacementFolder.open();
+
+  // Everything driven by the time uniform.
+  const animationFolder = gui.addFolder('Animation');
+  addSlider(animationFolder, 'roilSpeed', 0.0, 3.0, 0.05, 'roil speed');
+  addSlider(animationFolder, 'pulsePeriod', 0.5, 12.0, 0.1, 'pulse period');
+  addSlider(animationFolder, 'pulseStrength', 0.0, 1.0, 0.01, 'pulse strength');
+  animationFolder.open();
+
+  // The fragment shader's gradient and banding.
+  const colorFolder = gui.addFolder('Color');
+  addSlider(colorFolder, 'heat', 0.2, 0.8, 0.01, 'heat');
+  addSlider(colorFolder, 'flow', 0.0, 0.6, 0.01, 'color flow');
+  addSlider(colorFolder, 'bands', 0, 12, 1, 'color bands');
+  addSlider(colorFolder, 'bandBlend', 0.0, 1.0, 0.01, 'band blend');
+  colorFolder.open();
+
+  // The procedural planet behind the flame.
+  const backgroundFolder = gui.addFolder('Background');
+  addSlider(backgroundFolder, 'horizon', -0.6, 0.8, 0.01, 'horizon');
+  addSlider(backgroundFolder, 'atmosphere', 0.005, 0.12, 0.001, 'atmosphere');
+  backgroundFolder.open();
+
+  // Left at the root so they stay reachable with every folder collapsed.
   gui.add(controls, 'Load Scene');
   gui.add(controls, 'Reset Defaults');
 
@@ -108,7 +146,12 @@ function main() {
   // Initial call to load scene
   loadScene();
 
-  const camera = new Camera(vec3.fromValues(0, 0, 5), vec3.fromValues(0, 0, 0));
+  // Eye, target and up, all three read off the console readout in Camera.ts.
+  // The up vector is the one that tilts the flame; without it the view comes
+  // back upright however the eye is placed.
+  const camera = new Camera(vec3.fromValues(4.48, 1.01, -1.98),
+                            vec3.fromValues(0, 0, 0),
+                            vec3.fromValues(-0.12, 0.69, -0.72));
 
   const renderer = new OpenGLRenderer(canvas);
   // The background covers every pixel, so this only shows if it fails to draw.

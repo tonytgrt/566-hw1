@@ -16,7 +16,7 @@ export default defineConfig({
     strictPort: true,
     open: false,
     allowedHosts: [
-      '566-hw1.tonyxtian.com',
+      'fireball.tonyxtian.com',
       'localhost',
       '127.0.0.1'
     ],
