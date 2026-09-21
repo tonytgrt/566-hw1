@@ -16,7 +16,8 @@ export interface FireballParams {
   pulsePeriod: number;    // u_PulsePeriod
   pulseStrength: number;  // u_PulseStrength
   heat: number;           // u_Heat
-  flicker: number;        // u_Flicker
+  flow: number;           // u_Flow
+  bandBlend: number;      // u_BandBlend
   flameHeight: number;    // u_FlameHeight
   taper: number;          // u_Taper
   bands: number;          // u_Bands
@@ -57,7 +58,8 @@ class ShaderProgram {
   unifPulsePeriod: WebGLUniformLocation;
   unifPulseStrength: WebGLUniformLocation;
   unifHeat: WebGLUniformLocation;
-  unifFlicker: WebGLUniformLocation;
+  unifFlow: WebGLUniformLocation;
+  unifBandBlend: WebGLUniformLocation;
   unifFlameHeight: WebGLUniformLocation;
   unifTaper: WebGLUniformLocation;
   unifBands: WebGLUniformLocation;
@@ -92,7 +94,8 @@ class ShaderProgram {
     this.unifPulsePeriod   = gl.getUniformLocation(this.prog, "u_PulsePeriod");
     this.unifPulseStrength = gl.getUniformLocation(this.prog, "u_PulseStrength");
     this.unifHeat          = gl.getUniformLocation(this.prog, "u_Heat");
-    this.unifFlicker       = gl.getUniformLocation(this.prog, "u_Flicker");
+    this.unifFlow          = gl.getUniformLocation(this.prog, "u_Flow");
+    this.unifBandBlend     = gl.getUniformLocation(this.prog, "u_BandBlend");
     this.unifFlameHeight   = gl.getUniformLocation(this.prog, "u_FlameHeight");
     this.unifTaper         = gl.getUniformLocation(this.prog, "u_Taper");
     this.unifBands         = gl.getUniformLocation(this.prog, "u_Bands");
@@ -172,8 +175,11 @@ class ShaderProgram {
     if (this.unifHeat !== -1) {
       gl.uniform1f(this.unifHeat, p.heat);
     }
-    if (this.unifFlicker !== -1) {
-      gl.uniform1f(this.unifFlicker, p.flicker);
+    if (this.unifFlow !== -1) {
+      gl.uniform1f(this.unifFlow, p.flow);
+    }
+    if (this.unifBandBlend !== -1) {
+      gl.uniform1f(this.unifBandBlend, p.bandBlend);
     }
     if (this.unifFlameHeight !== -1) {
       gl.uniform1f(this.unifFlameHeight, p.flameHeight);

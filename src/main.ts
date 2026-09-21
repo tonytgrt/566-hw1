@@ -24,7 +24,8 @@ const defaults: FireballParams & {tesselations: number} = {
   pulsePeriod: 4.7,     // seconds per surge cycle
   pulseStrength: 0.59,  // 0 holds the flame steady, 1 is the full surge
   heat: 0.5,            // 0.5 is the gradient as authored, higher runs hotter
-  flicker: 0.72,         // strength of the fragment shader's animated shimmer
+  flow: 0.42,           // how strongly flowing noise warps the color gradient
+  bandBlend: 0.79,      // 0 gives hard cel band edges, 1 an unbroken gradient
   flameHeight: 1.5,     // vertical stretch from sphere to flame
   taper: 0.12,          // how far the crown is drawn in relative to the root
   bands: 12,             // quantized color bands; below 2 the gradient is smooth
@@ -80,7 +81,8 @@ function main() {
   gui.add(controls, 'pulsePeriod', 0.5, 12.0).step(0.1).name('pulse period');
   gui.add(controls, 'pulseStrength', 0.0, 1.0).step(0.01).name('pulse strength');
   gui.add(controls, 'heat', 0.2, 0.8).step(0.01).name('heat');
-  gui.add(controls, 'flicker', 0.0, 1.0).step(0.01).name('flicker');
+  gui.add(controls, 'flow', 0.0, 0.6).step(0.01).name('color flow');
+  gui.add(controls, 'bandBlend', 0.0, 1.0).step(0.01).name('band blend');
   gui.add(controls, 'flameHeight', 1.0, 2.5).step(0.05).name('flame height');
   gui.add(controls, 'taper', 0.0, 0.8).step(0.01).name('taper');
   gui.add(controls, 'bands', 0, 12).step(1).name('color bands');

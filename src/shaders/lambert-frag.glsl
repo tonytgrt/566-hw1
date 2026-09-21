@@ -23,10 +23,17 @@ uniform vec3 u_CameraPos;  // World-space eye position, for the grazing-angle ri
 uniform float u_Heat;      // 0.5 leaves the gradient alone; higher pushes more of the
                            // surface toward the hot end, lower cools it down.
 
-uniform float u_Flicker;   // Strength of the animated shimmer across the surface.
+uniform float u_Flow;      // How strongly the flowing noise warps the color gradient.
 
 uniform float u_Bands;     // Number of quantized color bands. Below 2 the gradient stays
                            // smooth; higher values give the painted, cel-shaded look.
+
+uniform float u_BandBlend; // How much of each band's width is spent crossing into the
+                           // next: 0 gives hard cel edges, 1 an unbroken gradient.
+
+// Shared with the vertex shader, so the color streams upward at the same rate
+// the geometry churns at.
+uniform float u_RoilSpeed;
 
 // These are the interpolated values out of the rasterizer, so you can't know
 // their specific values without knowing the vertices that contributed to them
@@ -79,14 +86,7 @@ float gain(float g, float t)
                      : 1.0 - bias(1.0 - g, 2.0 - 2.0 * t) * 0.5;
 }
 
-// 3) Triangle wave: ramps up and back down over [0, amp], with no rounding at
-//    the turns. Its hard corners read as a flicker rather than a smooth throb.
-float triangleWave(float x, float freq, float amp)
-{
-    return abs(mod(x * freq, amp * 2.0) - amp);
-}
-
-// 4) Smootherstep (Perlin's quintic ease): C2-continuous ease-in/ease-out. Used
+// 3) Smootherstep (Perlin's quintic ease): C2-continuous ease-in/ease-out. Used
 //    to blend between palette stops so no band edge is visible.
 float smootherstep(float a, float b, float t)
 {
@@ -94,7 +94,7 @@ float smootherstep(float a, float b, float t)
     return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
 }
 
-// 5) Cubic pulse: a smooth bump of width w centered on c, zero everywhere else.
+// 4) Cubic pulse: a smooth bump of width w centered on c, zero everywhere else.
 //    Targets a narrow slice of the gradient without touching the rest of it.
 float cubicPulse(float c, float w, float x)
 {
@@ -104,6 +104,75 @@ float cubicPulse(float c, float w, float x)
     }
     x /= w;
     return 1.0 - x * x * (3.0 - 2.0 * x);
+}
+
+// ---------------------------------------------------------------------------
+// Per-pixel noise. The vertex shader has its own copy; GLSL has no include
+// mechanism, and this has to be evaluated per fragment rather than interpolated
+// from the vertices, or the color boundaries could only ever be straight lines
+// between one vertex and the next.
+// ---------------------------------------------------------------------------
+
+// Both fixed rather than slider-driven. The octave count keeps the per-pixel
+// cost constant, and the scale is in world units rather than a multiple of
+// u_FbmScale, so pushing the geometry's detail up does not shatter the color
+// into speckle - the two are separate art-direction decisions.
+const int   COLOR_OCTAVES = 3;
+const float COLOR_SCALE   = 1.5;
+
+float hash31(vec3 p)
+{
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float valueNoise(vec3 p)
+{
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+
+    float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
+    float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+    float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+    float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+    float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+    float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+    float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+    float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+
+    return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
+               mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),
+               u.z);
+}
+
+float fbm(vec3 p)
+{
+    float sum = 0.0, amp = 0.5, freq = 1.0, norm = 0.0;
+    for (int i = 0; i < COLOR_OCTAVES; ++i)
+    {
+        sum  += amp * valueNoise(p * freq + float(i) * 17.3);
+        norm += amp;
+        amp  *= 0.5;
+        freq *= 2.0;
+    }
+    return sum / norm;
+}
+
+// Quantize x into `bands` steps, crossing between them over a `blend` fraction
+// of each step instead of snapping. blend near 0 gives hard cel edges, blend of
+// 1 gives back a continuous ramp. Monotone and continuous at every boundary.
+float posterize(float x, float bands, float blend)
+{
+    if (bands < 2.0) {
+        return x;
+    }
+    float scaled = x * bands;
+    float cell   = floor(scaled);
+    float f      = fract(scaled);
+    float w      = clamp(blend, 0.002, 1.0) * 0.5;
+    return (cell + smootherstep(0.5 - w, 0.5 + w, f)) / bands;
 }
 
 // Walk up the palette, easing between each pair of stops. Layering the mixes
@@ -128,11 +197,22 @@ void main()
     vec3 lgt  = normalize(vec3(fs_LightVec));
     vec3 view = normalize(u_CameraPos - vec3(fs_Pos));
 
+    // Flowing noise, sampled per pixel in world space and marched downward
+    // through the field so it streams up the flame.
+    vec3  flowPos = vec3(fs_Pos) * COLOR_SCALE
+                  + vec3(0.0, -u_RoilSpeed * u_Time, 0.0);
+    float flow    = fbm(flowPos);
+
     // The dominant term is position along the flame. Fire is fed at its root, so
     // the base burns white-hot and everything cools on the way up until the
     // crown is charred. Gain above 0.5 drives the two ends apart, which widens
     // the white core at the base and deepens the char at the tip.
     float heat = gain(0.68, 1.0 - fs_Height);
+
+    // Warp that gradient with the flowing noise. Displacing the coordinate
+    // rather than the color is what makes whole tongues of one band push up into
+    // the next, the way the boundaries in real fire wander and reconnect.
+    heat += u_Flow * (flow - 0.5) * 2.0;
 
     // Stay correlated with the vertex shader's displacement: a tongue that has
     // pushed further up has travelled further from the fuel, so it reads cooler
@@ -143,24 +223,16 @@ void main()
     // scale than the low-frequency sway reaches.
     heat *= mix(0.84, 1.12, fs_Fbm);
 
-    // Animated flicker. Offsetting the wave's phase by world position means the
-    // surface shimmers unevenly instead of strobing as one unit.
-    float phase = dot(vec3(fs_Pos), vec3(1.9, 2.7, 2.3));
-    heat += u_Flicker * 0.14 * (triangleWave(u_Time * 1.6 + phase, 1.0, 1.0) - 0.5);
-
     // The surge cycle flashes the whole flame hotter as it swells.
     heat += 0.16 * fs_Pulse;
 
     // Finally the heat slider biases the whole ramp hotter or cooler.
     heat = bias(clamp(u_Heat, 0.05, 0.95), clamp(heat, 0.0, 1.0));
 
-    // Quantize into bands for the painted look of stylized fire. Jittering the
-    // threshold with the FBM layer makes each band edge wander across the
-    // surface instead of ringing the flame in a clean horizontal line.
-    if (u_Bands >= 2.0) {
-        float wobbled = heat + 0.07 * (fs_Fbm - 0.5);
-        heat = floor(wobbled * u_Bands + 0.5) / u_Bands;
-    }
+    // Quantize into bands for the painted look of stylized fire. The warp above
+    // has already bent the boundaries into organic shapes, so this only decides
+    // how hard the steps between them read.
+    heat = posterize(heat, u_Bands, u_BandBlend);
 
     vec3 color = fireRamp(heat);
 
