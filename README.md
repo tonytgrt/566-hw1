@@ -1,60 +1,131 @@
-# HW 1: WebGL Fireball
+# WebGL Fireball — Meteor Over Earth
 
-<p align="center">
-  <img width="360" height="360" src="fireball.png">
-</p>
-<p align="center">(source: Aidan Gideon, CIS 5660 Fall 2025)</p>
+A procedural fireball built in GLSL: an icosphere bent into a flame by a
+vertex shader, colored by a height-driven gradient in a fragment shader, and set
+against a procedurally generated Earth.
 
-## Objective
-Get comfortable with using WebGL and its shaders to generate an interesting 3D, continuous surface using a multi-octave noise algorithm.
+![The fireball falling toward a procedurally generated Earth](screenshot.png)
 
+**Live demo: [fireball.tonyxtian.com](https://fireball.tonyxtian.com)**
 
-## Getting Started
-- __Fork__ this repository
-- Run `npm install` and `npm run dev` to set up the dependencies for this project
-- Under the Github repo settings, navigate to "Build and deployment" -> "Source", and select **GitHub Actions**
-- Push (or re-push) to `master`. The workflow will build your project and deploy it automatically. The project should be visible at http://username.github.io/repo-name.
+*CIS 5660 — Homework 1. Base code from the course repository.*
 
-## Assignment Details
-- You will alter the vertex and fragment shaders used to render the Icosphere so that it looks like a fireball.
-- Your vertex shader should apply a low-frequency, high-amplitude displacement of your sphere so as to make it less uniformly sphere-like. You might consider using a combination of sinusoidal functions for this purpose. We recommend a function of the form `f(x, y, z) = h` to displace your vertices along a vector, such as their surface normals.
-- Your vertex shader should also apply a higher-frequency, lower-amplitude layer of fractal Brownian motion to apply a finer level of distortion on top of the high-amplitude displacement.
-- Your fragment shader should apply a gradient of colors to your fireball's surface, where the fragment color is correlated in some way to the vertex shader's displacement.
-- Both the vertex and fragment shaders should alter their output based on a uniform time variable (i.e. they should be animated). You might consider making a constant animation that causes the fireball's surface to roil, or you could make an animation loop in which the fireball repeatedly explodes.
-- Across both shaders, you should make use of at least four of the functions discussed in the Toolbox Functions slides.
+---
 
-## Noise Application
-View your noise in action by applying it as a displacement on the surface of your icosahedron, giving your icosahedron a bumpy, cloud-like appearance. Simply take the noise value as a height, and offset the vertices along the icosahedron's surface normals. You are, of course, free to alter the way your noise perturbs your icosahedron's surface as you see fit; we are simply recommending an easy way to visualize your noise. You could even apply a couple of different noise functions to perturb your surface to make it even less spherical.
+## What it does
 
-In order to animate the vertex displacement, use time as the third dimension or as some offset to the (x, y, z) input to the noise function. Pass the current time since start of program as a uniform to the shaders.
+The scene is two shader programs and two pieces of geometry:
 
-For both visual impact and debugging help, also apply color to your geometry using the noise value at each point. There are several ways to do this. For example, you might use the noise value to create UV coordinates to read from a texture (say, a simple gradient image), or just compute the color by hand by lerping between values.
+| | Geometry | Shaders |
+|---|---|---|
+| **Fireball** | Icosphere, up to 10,242 vertices | `lambert-vert.glsl`, `lambert-frag.glsl` |
+| **Background** | Full-screen quad | `background-vert.glsl`, `background-frag.glsl` |
 
-## Interactivity
-Using dat.GUI, make at least THREE aspects of your demo interactive variables. For example, you could add a slider to adjust the strength or scale of the noise, change the number of noise octaves, etc.
+The background is drawn first with the depth test disabled, so it neither tests
+nor writes depth and can never occlude the flame.
 
-Add a button that will restore your fireball to some nice-looking (courtesy of your art direction) defaults.
+## Vertex shader — making fire, not a blob
 
-## Extra Spice
-Choose one of the following options:
+A sphere displaced along its normals looks like a liquid blob, because it bulges
+in every direction at once. Fire does not. So the displacement here is
+**directional**:
 
-- Background (easy-hard depending on how fancy you get): Add an interesting background or a more complex scene to place your fireball in so it's not floating in a black void
-- Custom mesh (easy): Figure out how to import a custom mesh rather than using an icosahedron for a fancy-shaped cloud.
-- Mouse interactivity (medium): Find out how to get the current mouse position in your scene and use it to deform your cloud, such that users can deform the cloud with their cursor.
-- Music (hard): Figure out a way to use music to drive your noise animation in some way, such that your noise cloud appears to dance.
+1. **Teardrop base.** The sphere is stretched vertically and its cross-section is
+   eased inward above the waist, giving a wide round root and a narrower crown.
+2. **Displacement along +Y only.** Every offset is `vec3(0, h, 0)`, scaled by a
+   mask that is 0 at the root and 1 at the crown. The base stays anchored and
+   smooth while the top frays — which is what reads as flame rather than fluid.
+3. **Low-frequency layer** (`f(x, y, z) = h`): a product of three sinusoids at
+   incommensurate frequencies, plus a vertical ripple and a slower swell. This is
+   the large, slow sway of the flame body.
+4. **High-frequency layer:** multi-octave value-noise FBM at lower amplitude.
+   Sharpened and clamped to a strictly positive term confined to the upper half,
+   it becomes the licking tongues along the crown.
+5. **Recomputed normals.** Without this the lighting still reads as a smooth
+   sphere and none of the displacement shows. Normals are rebuilt per vertex by
+   finite differencing across the displaced surface.
 
-## Submission
-1. Create a pull request to this repository with your completed code.
-2. Update README.md to contain a solid description of your project with a screenshot of some visuals, and a link to your live demo.
-3. Submit the link to your pull request on Gradescope, and add a comment to your submission with a hyperlink to your live demo.
-4. Include a link to your live site.
+Everything is animated from a `u_Time` uniform: the sinusoid phases advance, the
+FBM sample point marches *downward* through the noise field so detail appears to
+stream up the flame, and a sawtooth-driven impulse makes the whole flame surge
+and settle on a loop that is continuous across the wrap.
 
-## Resources
-- Javascript modules https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import
-- Typescript https://www.typescriptlang.org/docs/home.html
-- dat.gui https://workshop.chromeexperiments.com/examples/gui/
-- glMatrix http://glmatrix.net/docs/
-- WebGL
-  - Interfaces https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API
-  - Types https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Types
-  - Constants https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Constants
+## Fragment shader — hottest at the root
+
+Color is driven primarily by **position along the flame**, since fire is fed at
+its base and cools as it rises. The gradient runs white-hot → straw → amber →
+orange → deep red → charred, with a gain curve that widens the white core at the
+bottom and deepens the char at the tip.
+
+On top of that:
+
+- **Correlated with the displacement**, as the assignment requires: a tongue that
+  has pushed further from the fuel reads cooler than the body it came from.
+- **Warped by flowing per-pixel noise.** This is what makes the color boundaries
+  meander and reconnect. It has to be evaluated per fragment — a value
+  interpolated from the vertices can only ever produce straight edges between
+  them.
+- **Quantized into bands** with a controllable soft edge, for a painted,
+  cel-shaded look that ranges from hard steps to an unbroken gradient.
+- **Rim glow** gated by heat, so the charred crown keeps a hard dark edge, plus
+  scattered embers still glowing in the burnt tip.
+
+## Background — a procedural Earth
+
+The planet is a single circle with a radius far larger than the screen, centered
+well below it, so only a shallow arc is ever visible. That is what makes it read
+as the limb of something enormous rather than a ball sitting in frame.
+
+- The **sphere normal is reconstructed** from the disc coordinate, so the surface
+  is genuinely shaded and textured as a sphere.
+- **Continents and two drifting cloud layers** come from the same FBM, sampled
+  along that normal and rotated slowly.
+- The **atmosphere** is an exponential falloff outside the disc, gated by the sun
+  direction so only the lit limb scatters. This is the band that blends the
+  planet up into black.
+- **Stars** come from a hashed grid with most cells left empty, and a soft sun
+  glow sits just off the top-right corner along the same direction that lights
+  the planet.
+
+## Toolbox functions
+
+Six distinct functions across the two fireball shaders:
+
+| Function | Where | Used for |
+|---|---|---|
+| `bias` | both | shaping noise, biasing the gradient hotter or cooler |
+| `gain` | both | contrast around the midpoint of the gradient and the noise |
+| `sawtooth` | vertex | the looping surge clock |
+| `expImpulse` | vertex | fast-attack / slow-decay surge envelope |
+| `smootherstep` | both | height masks, palette stop blending, soft band edges |
+| `cubicPulse` | fragment | embers in the charred crown |
+
+## Controls
+
+Seventeen live parameters, grouped into folders, plus a **Reset Defaults** button
+that restores the art-directed values.
+
+| Folder | Controls |
+|---|---|
+| **Flame shape** | tesselations, flame height, taper |
+| **Displacement** | sway amount, sway scale, detail amount, detail scale, fbm octaves |
+| **Animation** | roil speed, pulse period, pulse strength |
+| **Color** | heat, color flow, color bands, band blend |
+| **Background** | horizon, atmosphere |
+
+Drag to orbit the camera, scroll to zoom.
+
+## Running locally
+
+```bash
+npm install
+npm run dev
+```
+
+Then open the URL Vite prints. `npm run build` type-checks and produces a
+production build in `dist/`. Site deployed to a personal VPS.
+
+## Credits
+
+Base code and assignment by the CIS 5660 course staff. Reference fireball image
+by Aidan Gideon, CIS 5660 Fall 2025.
