@@ -35,7 +35,12 @@ out vec4 fs_Col;            // The color of each vertex. This is implicitly pass
 out float fs_Disp;          // Total displacement applied to this vertex, remapped to roughly [0, 1].
                             // The fragment shader uses this to drive the fireball's color gradient.
 out float fs_Fbm;           // Just the high-frequency FBM layer, for finer color detail.
-out vec4 fs_Pos;            // The undisplaced model-space position, useful for further noise lookups.
+out float fs_Height;        // 0 at the root of the flame, 1 at the crown. The fragment shader's
+                            // gradient runs along this: white-hot base, charred tip.
+out float fs_Pulse;         // [0, 1] phase of the explosion cycle, so the fragment shader can
+                            // flash the color in step with the geometry's swell.
+out vec4 fs_Pos;            // The displaced world-space position, used for the view vector and
+                            // for varying the flicker across the surface.
 
 const vec4 lightPos = vec4(5, 5, 3, 1); //The position of our virtual light, which is used to compute the shading of
                                         //the geometry in the fragment shader.
@@ -52,9 +57,17 @@ uniform int   u_Octaves;       // how many FBM octaves are summed
 uniform float u_RoilSpeed;     // how quickly the surface churns
 uniform float u_PulsePeriod;   // seconds per "breath"/explosion cycle
 uniform float u_PulseStrength; // 0 holds the ball steady, 1 is the full swell
+uniform float u_FlameHeight;   // how far the sphere is stretched vertically into a flame
+uniform float u_Taper;         // how far the crown is drawn in relative to the root
 
 const int   MAX_OCTAVES = 8;    // hard bound so the FBM loop always terminates
-const float MIN_RADIUS  = 0.15; // fraction of the base radius the surface may never go below
+const float MIN_TAPER   = 0.05; // keeps the crown from collapsing to zero width
+
+// The offset's theoretical maximum is far larger than what its terms ever reach
+// together: sampled over the sphere, offset/maxOffset only spans a narrow slice
+// of [0, 1], which would leave the fragment shader's mottling stuck on one flat
+// value. This expands that measured spread. Measured to hold across the sliders.
+const float DISP_SPREAD = 2.6;
 const float PULSE_MIN   = 0.85; // displacement multiplier at rest
 const float PULSE_MAX   = 1.35; // displacement multiplier at the peak of a burst
 
@@ -68,7 +81,9 @@ float bias(float b, float t)
     return pow(t, log(b) / log(0.5));
 }
 
-// 2) Perlin's gain: sharpens (g < 0.5) or softens (g > 0.5) the contrast around 0.5.
+// 2) Perlin's gain: reshapes contrast around 0.5. Above 0.5 it pushes values
+//    away from the middle, sharpening them; below 0.5 it pulls them toward it.
+//    0.5 is the identity.
 float gain(float g, float t)
 {
     return (t < 0.5) ? bias(1.0 - g, 2.0 * t) * 0.5
@@ -177,13 +192,11 @@ float lowFrequencyHeight(vec3 p, float t)
     return 0.62 * lobes + 0.20 * ripple + 0.18 * swell;
 }
 
-// The full height field: the sinusoidal base plus a finer FBM crust, wrapped in
-// a looping pulse so the fireball repeatedly swells and settles.
-// Writes the raw layers out through `outLow` / `outFbm` for the color gradient.
-float surfaceHeight(vec3 dir, float t, out float outLow, out float outFbm)
+// Looping "explosion" clock, normalized to [0, 1]: 0 at rest, 1 at the peak of
+// a burst. The geometry swells with it and the fragment shader flashes with it.
+float pulsePhase(float t)
 {
-    // Looping "explosion" clock: ramps 0 -> 1 once per period, shaped into a
-    // fast burst with a slow settle. max() keeps the period away from 0, which
+    // Ramps 0 -> 1 once per period. max() keeps the period away from 0, which
     // would make the sawtooth NaN.
     float cycle = sawtooth(t, max(0.01, u_PulsePeriod));
 
@@ -191,69 +204,108 @@ float surfaceHeight(vec3 dir, float t, out float outLow, out float outFbm)
     // at exactly 0 when the sawtooth wraps, so the loop has no visible pop.
     float burst = expImpulse(cycle, 6.0) * (1.0 - smootherstep(0.75, 1.0, cycle));
 
-    float envelope = mix(PULSE_MIN, PULSE_MAX, smootherstep(0.0, 1.0, burst));
+    return smootherstep(0.0, 1.0, burst);
+}
 
-    // At strength 0 the envelope flattens to 1.0 and the ball stops breathing.
+// ---------------------------------------------------------------------------
+// Flame shape
+//
+// Fire does not bulge in every direction the way a liquid blob does, so the
+// sphere is first bent into a teardrop and then displaced along +Y only. The
+// root of a flame is anchored and smooth; everything that moves, moves upward.
+// ---------------------------------------------------------------------------
+
+// Normalized position along the flame: 0 at the root, 1 at the crown.
+float flameParam(vec3 dir)
+{
+    return 0.5 * (dir.y + 1.0);
+}
+
+// Bend the unit sphere into a teardrop: wide and round at the root, drawn in
+// toward the crown, and stretched vertically. This is the static silhouette the
+// displacement is then layered on top of.
+vec3 flameShape(vec3 dir, float radius)
+{
+    float u = flameParam(dir);
+
+    // Easing the taper in above the waist keeps the root a full round dome and
+    // pulls the width in only over the upper half.
+    float taper = mix(1.0, max(MIN_TAPER, 1.0 - u_Taper), smootherstep(0.20, 1.0, u));
+
+    return radius * vec3(dir.x * taper, dir.y * u_FlameHeight, dir.z * taper);
+}
+
+// The displacement, which runs along +Y and nothing else. Writes the raw noise
+// layers out through `outSway` / `outDetail` for the fragment shader's mottling.
+vec3 flameOffset(vec3 dir, float radius, float t, out float outSway, out float outDetail)
+{
+    float u    = flameParam(dir);
+    vec3  base = flameShape(dir, radius);
+
+    float envelope = mix(PULSE_MIN, PULSE_MAX, pulsePhase(t));
+
+    // At strength 0 the envelope flattens to 1.0 and the flame stops surging.
     float pulse = mix(1.0, envelope, u_PulseStrength);
 
-    outLow = lowFrequencyHeight(dir, t);
+    // The root is anchored and the crown is free, so the whole field is scaled
+    // by height. This is what keeps the base a clean dome while the top frays.
+    float rise = smootherstep(0.05, 0.95, u);
 
-    // Animate the FBM by marching its sample point through the noise field,
-    // using time as an offset to the (x, y, z) input.
-    vec3  noisePos = dir * u_FbmScale + vec3(0.0, -u_RoilSpeed * t, 0.35 * t);
+    outSway = lowFrequencyHeight(base, t);
+
+    // Marching the sample point downward through the noise field makes the
+    // detail appear to stream up the flame, the way real fire does.
+    vec3  noisePos = base * u_FbmScale + vec3(0.0, -u_RoilSpeed * t, 0.0);
     float raw      = fbm(noisePos);
 
-    // Gain sharpens the noise into ridged, flame-like crests; bias then pulls
-    // the midtones down so the crests read as thin licks rather than lumps.
-    outFbm = bias(0.42, gain(0.38, raw));
+    // Gain below 0.5 softens the noise into rounded masses; bias then pulls the
+    // midtones down so what survives reads as licks rather than lumps.
+    outDetail = bias(0.42, gain(0.38, raw));
 
-    return u_LowFreqAmp * outLow * pulse + u_FbmAmp * (outFbm * 2.0 - 1.0) * pulse;
+    // Flames reach upward, never down, so the tongues are a strictly positive
+    // term confined to the crown. Sharpening it hard is what separates them into
+    // distinct licks instead of one rolling bulge.
+    float licks = bias(0.28, outDetail) * smootherstep(0.45, 1.0, u);
+
+    float h = u_LowFreqAmp * outSway * rise
+            + u_FbmAmp * (outDetail * 2.0 - 1.0) * rise
+            + u_FbmAmp * 3.0 * licks;
+
+    return vec3(0.0, h * pulse * radius, 0.0);
 }
 
-// Convenience overload used when computing neighbour samples for the normal.
-float surfaceHeight(vec3 dir, float t)
+// Where a point in direction `dir` ends up. Used for the neighbour samples the
+// recomputed normal is differenced from.
+vec3 flamePoint(vec3 dir, float radius, float t)
 {
-    float lo, hi;
-    return surfaceHeight(dir, t, lo, hi);
-}
-
-// Where a point in direction `dir` lands once `height` is applied along the
-// normal. Dialing the displacement and detail sliders up together can produce a
-// height more negative than the radius, which would pull the surface through
-// the origin and turn the sphere inside out, so the radius is floored.
-vec3 surfacePoint(vec3 dir, float radius, float height)
-{
-    return dir * max(MIN_RADIUS * radius, radius + height);
-}
-
-// Same thing, evaluating the height field itself. Used for the neighbour
-// samples that the recomputed normal is differenced from.
-vec3 displacedPoint(vec3 dir, float radius, float t)
-{
-    return surfacePoint(dir, radius, surfaceHeight(dir, t));
+    float sway, detail;
+    return flameShape(dir, radius) + flameOffset(dir, radius, t, sway, detail);
 }
 
 void main()
 {
     fs_Col = vs_Col;                         // Pass the vertex colors to the fragment shader for interpolation
-    fs_Pos = vs_Pos;
 
     // The icosphere is centered at the origin, so the surface normal is simply
     // the normalized position, and the radius is its length.
     vec3  dir    = normalize(vec3(vs_Nor));
     float radius = length(vec3(vs_Pos));
 
-    float low, detail;
-    float height = surfaceHeight(dir, u_Time, low, detail);
+    float sway, detail;
+    vec3  offset    = flameOffset(dir, radius, u_Time, sway, detail);
+    vec3  displaced = flameShape(dir, radius) + offset;
 
     // Hand the displacement to the fragment shader, remapped to ~[0, 1], so the
-    // color gradient stays correlated with the geometry.
+    // color stays correlated with the geometry.
     // max() guards the case where both amplitude sliders are dialed to 0.
-    float maxHeight = max(1e-4, (u_LowFreqAmp + u_FbmAmp) * PULSE_MAX);
-    fs_Disp = clamp(0.5 + 0.5 * height / maxHeight, 0.0, 1.0);
-    fs_Fbm  = detail;
+    float maxOffset = max(1e-4, (u_LowFreqAmp + u_FbmAmp) * PULSE_MAX * radius);
+    fs_Disp  = clamp(0.5 + 0.5 * DISP_SPREAD * offset.y / maxOffset, 0.0, 1.0);
+    fs_Fbm   = detail;
+    fs_Pulse = u_PulseStrength * pulsePhase(u_Time);
 
-    vec3 displaced = surfacePoint(dir, radius, height);
+    // How far up the flame this vertex sits, which is what drives the fragment
+    // shader's gradient: hottest at the root, charred at the crown.
+    fs_Height = clamp(0.5 + 0.5 * displaced.y / max(1e-4, radius * u_FlameHeight), 0.0, 1.0);
 
     // Recompute the normal by finite differencing across the displaced surface.
     // Without this the lighting still reads as a smooth sphere and none of the
@@ -265,8 +317,8 @@ void main()
     // Roughly the edge length of the icosphere at the default tesselation, so
     // the difference tracks features the mesh can actually resolve.
     const float eps = 0.02;
-    vec3 pt = displacedPoint(normalize(dir + tangent   * eps), radius, u_Time);
-    vec3 pb = displacedPoint(normalize(dir + bitangent * eps), radius, u_Time);
+    vec3 pt = flamePoint(normalize(dir + tangent   * eps), radius, u_Time);
+    vec3 pb = flamePoint(normalize(dir + bitangent * eps), radius, u_Time);
     vec3 displacedNor = normalize(cross(pt - displaced, pb - displaced));
 
     mat3 invTranspose = mat3(u_ModelInvTr);
@@ -278,6 +330,9 @@ void main()
 
 
     vec4 modelposition = u_Model * vec4(displaced, 1.0);   // Temporarily store the transformed vertex positions for use below
+
+    fs_Pos = modelposition;                  // The fragment shader needs the world-space position for
+                                             // its view vector and for the spatial flicker phase
 
     fs_LightVec = lightPos - modelposition;  // Compute the direction in which the light source lies
 

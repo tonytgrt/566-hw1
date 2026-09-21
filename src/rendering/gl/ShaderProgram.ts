@@ -1,4 +1,4 @@
-import {vec4, mat4} from 'gl-matrix';
+import {vec3, vec4, mat4} from 'gl-matrix';
 import Drawable from './Drawable';
 import {gl} from '../../globals';
 
@@ -15,6 +15,11 @@ export interface FireballParams {
   roilSpeed: number;      // u_RoilSpeed
   pulsePeriod: number;    // u_PulsePeriod
   pulseStrength: number;  // u_PulseStrength
+  heat: number;           // u_Heat
+  flicker: number;        // u_Flicker
+  flameHeight: number;    // u_FlameHeight
+  taper: number;          // u_Taper
+  bands: number;          // u_Bands
 }
 
 export class Shader {
@@ -51,6 +56,12 @@ class ShaderProgram {
   unifRoilSpeed: WebGLUniformLocation;
   unifPulsePeriod: WebGLUniformLocation;
   unifPulseStrength: WebGLUniformLocation;
+  unifHeat: WebGLUniformLocation;
+  unifFlicker: WebGLUniformLocation;
+  unifFlameHeight: WebGLUniformLocation;
+  unifTaper: WebGLUniformLocation;
+  unifBands: WebGLUniformLocation;
+  unifCameraPos: WebGLUniformLocation;
 
   constructor(shaders: Array<Shader>) {
     this.prog = gl.createProgram();
@@ -80,6 +91,12 @@ class ShaderProgram {
     this.unifRoilSpeed     = gl.getUniformLocation(this.prog, "u_RoilSpeed");
     this.unifPulsePeriod   = gl.getUniformLocation(this.prog, "u_PulsePeriod");
     this.unifPulseStrength = gl.getUniformLocation(this.prog, "u_PulseStrength");
+    this.unifHeat          = gl.getUniformLocation(this.prog, "u_Heat");
+    this.unifFlicker       = gl.getUniformLocation(this.prog, "u_Flicker");
+    this.unifFlameHeight   = gl.getUniformLocation(this.prog, "u_FlameHeight");
+    this.unifTaper         = gl.getUniformLocation(this.prog, "u_Taper");
+    this.unifBands         = gl.getUniformLocation(this.prog, "u_Bands");
+    this.unifCameraPos     = gl.getUniformLocation(this.prog, "u_CameraPos");
   }
 
   use() {
@@ -151,6 +168,29 @@ class ShaderProgram {
     }
     if (this.unifPulseStrength !== -1) {
       gl.uniform1f(this.unifPulseStrength, p.pulseStrength);
+    }
+    if (this.unifHeat !== -1) {
+      gl.uniform1f(this.unifHeat, p.heat);
+    }
+    if (this.unifFlicker !== -1) {
+      gl.uniform1f(this.unifFlicker, p.flicker);
+    }
+    if (this.unifFlameHeight !== -1) {
+      gl.uniform1f(this.unifFlameHeight, p.flameHeight);
+    }
+    if (this.unifTaper !== -1) {
+      gl.uniform1f(this.unifTaper, p.taper);
+    }
+    if (this.unifBands !== -1) {
+      gl.uniform1f(this.unifBands, p.bands);
+    }
+  }
+
+  // The fragment shader's rim glow needs to know where the eye is.
+  setCameraPos(pos: vec3) {
+    this.use();
+    if (this.unifCameraPos !== -1) {
+      gl.uniform3fv(this.unifCameraPos, pos);
     }
   }
 

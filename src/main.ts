@@ -15,14 +15,19 @@ import lambertFragSource from './shaders/lambert-frag.glsl?raw';
 // and they're kept separate so the button always has a pristine copy to restore.
 const defaults: FireballParams & {tesselations: number} = {
   tesselations: 5,
-  displacement: 0.14,   // amplitude of the low-frequency sinusoidal lobes
-  lobeScale: 0.8,       // frequency of those lobes
-  detail: 0.14,         // amplitude of the high-frequency FBM crust
-  detailScale: 1.3,     // frequency of that FBM
-  octaves: 2,           // how many FBM octaves get summed
-  roilSpeed: 0.6,      // how fast the surface churns
-  pulsePeriod: 5.2,     // seconds per explosion/breath cycle
-  pulseStrength: 0.47,   // 0 holds the ball steady, 1 is the full swell
+  displacement: 0.18,   // amplitude of the low-frequency upward sway
+  lobeScale: 1.2,       // frequency of that sway
+  detail: 0.37,         // amplitude of the high-frequency FBM, which forms the licks
+  detailScale: 6,     // frequency of that FBM
+  octaves: 5,           // how many FBM octaves get summed
+  roilSpeed: 1.1,       // how fast the flame streams upward
+  pulsePeriod: 4.7,     // seconds per surge cycle
+  pulseStrength: 0.59,  // 0 holds the flame steady, 1 is the full surge
+  heat: 0.5,            // 0.5 is the gradient as authored, higher runs hotter
+  flicker: 0.72,         // strength of the fragment shader's animated shimmer
+  flameHeight: 1.5,     // vertical stretch from sphere to flame
+  taper: 0.12,          // how far the crown is drawn in relative to the root
+  bands: 12,             // quantized color bands; below 2 the gradient is smooth
 };
 
 // Define an object with application parameters and button callbacks
@@ -68,12 +73,17 @@ function main() {
   gui.add(controls, 'tesselations', 0, 8).step(1);
   gui.add(controls, 'displacement', 0.0, 0.8).step(0.01).name('displacement');
   gui.add(controls, 'lobeScale', 0.2, 4.0).step(0.05).name('lobe scale');
-  gui.add(controls, 'detail', 0.0, 0.4).step(0.005).name('detail amount');
+  gui.add(controls, 'detail', 0.0, 0.6).step(0.005).name('detail amount');
   gui.add(controls, 'detailScale', 0.5, 8.0).step(0.1).name('detail scale');
   gui.add(controls, 'octaves', 0, 8).step(1).name('fbm octaves');
   gui.add(controls, 'roilSpeed', 0.0, 3.0).step(0.05).name('roil speed');
   gui.add(controls, 'pulsePeriod', 0.5, 12.0).step(0.1).name('pulse period');
   gui.add(controls, 'pulseStrength', 0.0, 1.0).step(0.01).name('pulse strength');
+  gui.add(controls, 'heat', 0.2, 0.8).step(0.01).name('heat');
+  gui.add(controls, 'flicker', 0.0, 1.0).step(0.01).name('flicker');
+  gui.add(controls, 'flameHeight', 1.0, 2.5).step(0.05).name('flame height');
+  gui.add(controls, 'taper', 0.0, 0.8).step(0.01).name('taper');
+  gui.add(controls, 'bands', 0, 12).step(1).name('color bands');
   gui.add(controls, 'Load Scene');
   gui.add(controls, 'Reset Defaults');
 

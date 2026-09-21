@@ -25,13 +25,17 @@ class OpenGLRenderer {
   render(camera: Camera, prog: ShaderProgram, drawables: Array<Drawable>) {
     let model = mat4.create();
     let viewProj = mat4.create();
-    let color = vec4.fromValues(1, 0, 0, 1);
+    // The fireball's fragment shader supplies its own fire gradient and treats
+    // this as a tint, so a neutral white leaves that palette as authored.
+    let color = vec4.fromValues(1, 1, 1, 1);
 
     mat4.identity(model);
     mat4.multiply(viewProj, camera.projectionMatrix, camera.viewMatrix);
     prog.setModelMatrix(model);
     prog.setViewProjMatrix(viewProj);
     prog.setGeometryColor(color);
+    // `controls.eye` is the live orbit position; `camera.position` is never updated.
+    prog.setCameraPos(camera.controls.eye);
 
     for (let drawable of drawables) {
       prog.draw(drawable);
