@@ -6,14 +6,16 @@ import Square from './geometry/Square';
 import OpenGLRenderer from './rendering/gl/OpenGLRenderer';
 import Camera from './Camera';
 import {setGL} from './globals';
-import ShaderProgram, {Shader, FireballParams} from './rendering/gl/ShaderProgram';
+import ShaderProgram, {Shader, FireballParams, BackgroundParams} from './rendering/gl/ShaderProgram';
 
 import lambertVertSource from './shaders/lambert-vert.glsl?raw';
 import lambertFragSource from './shaders/lambert-frag.glsl?raw';
+import backgroundVertSource from './shaders/background-vert.glsl?raw';
+import backgroundFragSource from './shaders/background-frag.glsl?raw';
 
 // The art-directed defaults. `Reset Defaults` copies these back over `controls`,
 // and they're kept separate so the button always has a pristine copy to restore.
-const defaults: FireballParams & {tesselations: number} = {
+const defaults: FireballParams & BackgroundParams & {tesselations: number} = {
   tesselations: 5,
   displacement: 0.18,   // amplitude of the low-frequency upward sway
   lobeScale: 1.2,       // frequency of that sway
@@ -29,6 +31,8 @@ const defaults: FireballParams & {tesselations: number} = {
   flameHeight: 1.5,     // vertical stretch from sphere to flame
   taper: 0.12,          // how far the crown is drawn in relative to the root
   bands: 12,             // quantized color bands; below 2 the gradient is smooth
+  horizon: 0.15,        // where the planet's limb crosses the centre of the screen
+  atmosphere: 0.028,    // thickness of the atmospheric halo above the limb
 };
 
 // Define an object with application parameters and button callbacks
@@ -86,6 +90,8 @@ function main() {
   gui.add(controls, 'flameHeight', 1.0, 2.5).step(0.05).name('flame height');
   gui.add(controls, 'taper', 0.0, 0.8).step(0.01).name('taper');
   gui.add(controls, 'bands', 0, 12).step(1).name('color bands');
+  gui.add(controls, 'horizon', -0.6, 0.8).step(0.01).name('horizon');
+  gui.add(controls, 'atmosphere', 0.005, 0.12).step(0.001).name('atmosphere');
   gui.add(controls, 'Load Scene');
   gui.add(controls, 'Reset Defaults');
 
@@ -105,12 +111,18 @@ function main() {
   const camera = new Camera(vec3.fromValues(0, 0, 5), vec3.fromValues(0, 0, 0));
 
   const renderer = new OpenGLRenderer(canvas);
-  renderer.setClearColor(0.2, 0.2, 0.2, 1);
+  // The background covers every pixel, so this only shows if it fails to draw.
+  renderer.setClearColor(0.004, 0.006, 0.014, 1);
   gl.enable(gl.DEPTH_TEST);
 
   const lambert = new ShaderProgram([
     new Shader(gl.VERTEX_SHADER, lambertVertSource),
     new Shader(gl.FRAGMENT_SHADER, lambertFragSource),
+  ]);
+
+  const background = new ShaderProgram([
+    new Shader(gl.VERTEX_SHADER, backgroundVertSource),
+    new Shader(gl.FRAGMENT_SHADER, backgroundFragSource),
   ]);
 
   const startTime = performance.now();
@@ -120,11 +132,22 @@ function main() {
     camera.update();
     // Seconds since the program started, passed to the shaders so their
     // displacement and color animate over time.
-    lambert.setTime((performance.now() - startTime) * 0.001);
+    const time = (performance.now() - startTime) * 0.001;
+    lambert.setTime(time);
     lambert.setFireballParams(controls);
     stats.begin();
     gl.viewport(0, 0, window.innerWidth, window.innerHeight);
     renderer.clear();
+
+    // The background is a screen-space quad drawn before anything else. With
+    // the depth test off it neither tests nor writes depth, so it can never
+    // occlude the flame no matter where the camera is.
+    gl.disable(gl.DEPTH_TEST);
+    background.setTime(time);
+    background.setDimensions(canvas.width, canvas.height);
+    background.setBackgroundParams(controls);
+    background.draw(square);
+    gl.enable(gl.DEPTH_TEST);
     if(controls.tesselations != prevTesselations)
     {
       prevTesselations = controls.tesselations;

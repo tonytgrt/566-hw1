@@ -6,6 +6,12 @@ var activeProgram: WebGLProgram = null;
 
 // The shape parameters the fireball's vertex shader reads. `controls` in main.ts
 // is the dat.GUI-backed object that satisfies this.
+// The procedural background's shape parameters, read by background-frag.glsl.
+export interface BackgroundParams {
+  horizon: number;      // u_Horizon
+  atmosphere: number;   // u_Atmosphere
+}
+
 export interface FireballParams {
   displacement: number;   // u_LowFreqAmp
   lobeScale: number;      // u_LowFreqScale
@@ -64,6 +70,9 @@ class ShaderProgram {
   unifTaper: WebGLUniformLocation;
   unifBands: WebGLUniformLocation;
   unifCameraPos: WebGLUniformLocation;
+  unifDimensions: WebGLUniformLocation;
+  unifHorizon: WebGLUniformLocation;
+  unifAtmosphere: WebGLUniformLocation;
 
   constructor(shaders: Array<Shader>) {
     this.prog = gl.createProgram();
@@ -100,6 +109,10 @@ class ShaderProgram {
     this.unifTaper         = gl.getUniformLocation(this.prog, "u_Taper");
     this.unifBands         = gl.getUniformLocation(this.prog, "u_Bands");
     this.unifCameraPos     = gl.getUniformLocation(this.prog, "u_CameraPos");
+
+    this.unifDimensions    = gl.getUniformLocation(this.prog, "u_Dimensions");
+    this.unifHorizon       = gl.getUniformLocation(this.prog, "u_Horizon");
+    this.unifAtmosphere    = gl.getUniformLocation(this.prog, "u_Atmosphere");
   }
 
   use() {
@@ -197,6 +210,25 @@ class ShaderProgram {
     this.use();
     if (this.unifCameraPos !== -1) {
       gl.uniform3fv(this.unifCameraPos, pos);
+    }
+  }
+
+  // Canvas size in pixels. The background uses it for the aspect ratio, so the
+  // planet stays circular whatever shape the window is.
+  setDimensions(width: number, height: number) {
+    this.use();
+    if (this.unifDimensions !== -1) {
+      gl.uniform2f(this.unifDimensions, width, height);
+    }
+  }
+
+  setBackgroundParams(p: BackgroundParams) {
+    this.use();
+    if (this.unifHorizon !== -1) {
+      gl.uniform1f(this.unifHorizon, p.horizon);
+    }
+    if (this.unifAtmosphere !== -1) {
+      gl.uniform1f(this.unifAtmosphere, p.atmosphere);
     }
   }
 
